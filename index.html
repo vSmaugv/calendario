@@ -58,7 +58,12 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline
   <div id="grid"></div>
   <p class="hint">Escribí “Nombre: tarea” (por ejemplo “Gena: hace la comida”) y cada persona tendrá su propio color. Para borrar una tarea, vaciá el texto y apretá Enter.</p>
 </main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
+// ====== CONFIGURACIÓN: pegá acá los datos de tu proyecto de Supabase ======
+const SUPABASE_URL='https://cwodfzijsusrvvhdvdcs.supabase.co';
+const SUPABASE_KEY='sb_publishable_ZJxVS8TRPPMJcopc5PFk1w_HsP2xj4g';
+// ==========================================================================
 const DAYS=['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
 const SLOTS=['Mañana','Mediodía','Tarde','Noche'];
 const LKEY='agenda-familiar-v1';
@@ -69,29 +74,38 @@ function monday(d){const x=new Date(d.getFullYear(),d.getMonth(),d.getDate());x.
 function key(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
 function addDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x}
 let cur=monday(new Date());
-let db=null,unsub=null,slots={},exists=false,loaded=false,timer=null;
+let sb=null,chan=null,slots={};
+const configured=!SUPABASE_URL.includes('TU-PROYECTO')&&!SUPABASE_KEY.includes('TU-ANON');
+try{if(configured&&window.supabase)sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY)}catch(e){sb=null}
 const st=document.getElementById('st');
 function setStatus(t){st.textContent=t}
 function hue(s){let h=0;for(const c of s.toLowerCase())h=(h*31+c.charCodeAt(0))%360;return h}
-function ref(d){return db.doc('weeks/'+key(d||cur))}
-function sub(){
-  if(unsub){unsub();unsub=null}
-  clearTimeout(timer);slots={};exists=false;
-  if(!db){slots=local[key(cur)]||{};render();return}
-  loaded=false;setStatus('Cargando…');render();
-  timer=setTimeout(()=>{if(!loaded)setStatus('Todavía no hay conexión. Lo que ves puede estar desactualizado.')},10000);
-  unsub=ref().onSnapshot(s=>{
-    exists=s.exists;
-    const d=s.exists?s.data():null;
-    slots=(d&&d.slots)||{};
-    if(!(s.metadata&&s.metadata.fromCache)){loaded=true;clearTimeout(timer);setStatus('Agenda compartida: todos ven los mismos cambios al instante.')}
-    render();
-  },e=>{setStatus('Error al cargar: '+((e&&(e.message||e.code))||'desconocido'))});
+const editing=()=>!!document.querySelector('.ed');
+async function load(silent){
+  const wk=key(cur);
+  if(!sb){slots=local[wk]||{};render();return}
+  if(!silent){slots={};setStatus('Cargando…');render()}
+  const {data,error}=await sb.from('agenda').select('slot,items').eq('week',wk);
+  if(wk!==key(cur))return;
+  if(error){setStatus('No se pudo cargar: '+error.message);return}
+  const s={};(data||[]).forEach(r=>{s[r.slot]=r.items||[]});
+  slots=s;setStatus('Agenda compartida: todos ven los mismos cambios.');
+  if(!editing())render();
+}
+function listen(){
+  if(!sb)return;
+  if(chan){sb.removeChannel(chan);chan=null}
+  const wk=key(cur);
+  chan=sb.channel('agenda-'+wk).on('postgres_changes',{event:'*',schema:'public',table:'agenda',filter:'week=eq.'+wk},p=>{
+    const r=p.new;
+    if(r&&r.slot){slots[r.slot]=r.items||[];if(!editing())render()}
+  }).subscribe();
 }
 function write(k,arr){
-  if(!db){slots[k]=arr;local[key(cur)]=slots;saveLocal();render();return}
-  const p=exists?ref().update({slots:{[k]:arr}}):ref().set({slots:{[k]:arr}});
-  p.catch(e=>setStatus('No se pudo guardar: '+((e&&(e.message||e.code))||'sin permiso. Pedí que te inviten como editor.')));
+  slots[k]=arr;
+  if(!sb){local[key(cur)]=slots;saveLocal();return}
+  sb.from('agenda').upsert({week:key(cur),slot:k,items:arr,updated_at:new Date().toISOString()},{onConflict:'week,slot'})
+    .then(({error})=>{if(error)setStatus('No se pudo guardar: '+error.message)});
 }
 function editor(val,done){
   const i=document.createElement('input');i.className='ed';i.value=val;i.placeholder='Ej.: Gena: hace la comida';i.setAttribute('aria-label','Tarea');
@@ -128,10 +142,8 @@ function render(){
         const e=entryEl(t);
         e.onclick=()=>{
           const i=editor(t,v=>{
-            if(v===null){render();return}
-            const arr=(slots[k]||[]).slice();
-            if(v==='')arr.splice(idx,1);else arr[idx]=v;
-            write(k,arr);render();
+            if(v!==null){const arr=(slots[k]||[]).slice();if(v==='')arr.splice(idx,1);else arr[idx]=v;write(k,arr)}
+            render();
           });
           e.replaceWith(i);i.focus();i.select();
         };
@@ -150,29 +162,24 @@ function render(){
     day.append(dh,sl);g.append(day);
   });
 }
-function go(n){cur=n;sub()}
+function go(n){cur=n;load();listen()}
 document.getElementById('prev').onclick=()=>go(addDays(cur,-7));
 document.getElementById('next').onclick=()=>go(addDays(cur,7));
 document.getElementById('today').onclick=()=>go(monday(new Date()));
 document.getElementById('copy').onclick=async()=>{
-  let prev={};
-  try{
-    if(db){const ps=await ref(addDays(cur,-7)).get();prev=(ps.exists&&ps.data().slots)||{}}
-    else prev=local[key(addDays(cur,-7))]||{};
-  }catch(e){setStatus('No se pudo leer la semana anterior.');return}
-  const merged={};
-  Object.keys(prev).forEach(k=>{if(prev[k]&&prev[k].length&&!(slots[k]&&slots[k].length))merged[k]=prev[k].slice()});
-  if(!Object.keys(merged).length)return;
-  if(!db){Object.assign(slots,merged);local[key(cur)]=slots;saveLocal();render();return}
-  const p=exists?ref().update({slots:merged}):ref().set({slots:merged});
-  p.catch(e=>setStatus('No se pudo copiar: '+((e&&(e.message||e.code))||'sin permiso')));
+  const pk=key(addDays(cur,-7));let prev={};
+  if(sb){
+    const {data,error}=await sb.from('agenda').select('slot,items').eq('week',pk);
+    if(error){setStatus('No se pudo leer la semana anterior.');return}
+    (data||[]).forEach(r=>{prev[r.slot]=r.items||[]});
+  }else prev=local[pk]||{};
+  Object.keys(prev).forEach(k=>{if(prev[k]&&prev[k].length&&!(slots[k]&&slots[k].length))write(k,prev[k].slice())});
+  render();
 };
 render();
-(async()=>{
-  try{if(window.claude&&window.claude.use)db=await window.claude.use('db')}catch(e){db=null}
-  if(!db)setStatus('Sin conexión compartida: los cambios se guardan solo en este dispositivo.');
-  sub();
-})();
+if(!sb)setStatus(configured?'No se pudo cargar Supabase. Los cambios se guardan solo en este dispositivo.':'Falta configurar Supabase: por ahora los cambios se guardan solo en este dispositivo.');
+load();listen();
+setInterval(()=>{if(sb&&!editing())load(true)},30000);
 </script>
 </body>
 </html>
