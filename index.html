@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Agenda de la familia</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#eef2f6;--card:#fff;--ink:#1f2a37;--mute:#64748b;--line:#d8e0e8;--accent:#0f7f86;--accent-ink:#fff;--today:#e0f3f3;--chip-l:92%;--chip-s:70%;--chip-b:45%;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#111a22;--card:#1a2530;--ink:#e6edf3;--mute:#93a1b1;--line:#2c3a48;--accent:#4cc3c9;--accent-ink:#06282a;--today:#17333a;--chip-l:22%;--chip-s:35%;--chip-b:60%;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#111a22;--card:#1a2530;--ink:#e6edf3;--mute:#93a1b1;--line:#2c3a48;--accent:#4cc3c9;--accent-ink:#06282a;--today:#17333a;--chip-l:22%;--chip-s:35%;--chip-b:60%;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 Figtree,system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1100px;margin:0 auto;padding:20px 14px 48px}
+h1{font:700 clamp(26px,5vw,38px)/1.1 "Bricolage Grotesque",Figtree,system-ui,sans-serif;margin:0 0 4px;letter-spacing:-.01em}
+.sub{color:var(--mute);margin:0 0 18px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:16px}
+.week{font:600 20px "Bricolage Grotesque",Figtree,sans-serif;min-width:170px;text-align:center}
+button{font:inherit;cursor:pointer;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:8px 13px}
+button:hover{border-color:var(--accent)}
+button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+.sp{flex:1}
+.day{background:var(--card);border:1px solid var(--line);border-radius:14px;margin-bottom:10px;display:grid;grid-template-columns:120px 1fr;overflow:hidden}
+.day.today{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent)}
+.dh{padding:14px;background:var(--bg);border-right:1px solid var(--line)}
+.today .dh{background:var(--today)}
+.dn{font:700 18px "Bricolage Grotesque",Figtree,sans-serif}
+.dd{color:var(--mute);font-size:14px}
+.slots{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
+.slot{padding:10px 10px 12px;border-left:1px solid var(--line);min-height:96px}
+.slot:first-child{border-left:0}
+.sl{font-size:13px;font-weight:600;color:var(--mute);margin-bottom:6px}
+.entry{display:block;width:100%;text-align:left;margin:0 0 6px;padding:7px 9px;border-radius:8px;border:0;border-left:4px solid hsl(var(--h) 60% var(--chip-b));background:hsl(var(--h) var(--chip-s) var(--chip-l));color:var(--ink);line-height:1.3;font-size:15px;overflow-wrap:anywhere}
+.entry b{font-weight:600}
+.add{border:1px dashed var(--line);background:transparent;color:var(--mute);width:100%;padding:5px;font-size:14px}
+.ed{width:100%;font:inherit;font-size:15px;padding:7px 9px;border-radius:8px;border:2px solid var(--accent);background:var(--card);color:var(--ink);margin-bottom:6px}
+.hint{color:var(--mute);font-size:14px;margin-top:18px}
+@media (max-width:860px){.slots{grid-template-columns:repeat(2,minmax(0,1fr))}.slot:nth-child(3){border-left:0}.slot:nth-child(n+3){border-top:1px solid var(--line)}}
+@media (max-width:560px){.day{grid-template-columns:1fr}.dh{border-right:0;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:baseline}.slots{grid-template-columns:1fr}.slot,.slot:nth-child(3){border-left:0;border-top:1px solid var(--line);min-height:0}.slot:first-child{border-top:0}.week{min-width:0;flex:1 1 100%;order:-1;text-align:left}}
+</style>
+</head>
+<body>
+<main>
+  <h1>Agenda de la familia</h1>
+  <p class="sub">Tocá un casillero para agregar algo. Tocá una tarea para cambiarla o borrarla.</p>
+  <div class="bar">
+    <button id="prev" aria-label="Semana anterior">‹ Anterior</button>
+    <div class="week" id="wl"></div>
+    <button id="next" aria-label="Semana siguiente">Siguiente ›</button>
+    <button id="today">Hoy</button>
+    <span class="sp"></span>
+    <button id="copy" class="primary">Copiar semana anterior</button>
+  </div>
+  <div id="grid"></div>
+  <p class="hint">Escribí “Nombre: tarea” (por ejemplo “Gena: hace la comida”) y cada persona tendrá su propio color. Para borrar una tarea, vaciá el texto y apretá Enter.</p>
+</main>
+<script>
+const DAYS=['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
+const SLOTS=['Mañana','Mediodía','Tarde','Noche'];
+const KEY='agenda-familiar-v1';
+let store={};
+try{store=JSON.parse(localStorage.getItem(KEY)||'{}')||{}}catch(e){store={}}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(store))}catch(e){}}
+function monday(d){const x=new Date(d.getFullYear(),d.getMonth(),d.getDate());x.setDate(x.getDate()-((x.getDay()+6)%7));return x}
+function key(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function addDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x}
+let cur=monday(new Date());
+function hue(s){let h=0;for(const c of s.toLowerCase())h=(h*31+c.charCodeAt(0))%360;return h}
+function wk(){return store[key(cur)]||(store[key(cur)]={})}
+function editor(val,done){
+  const i=document.createElement('input');i.className='ed';i.value=val;i.placeholder='Ej.: Gena: hace la comida';i.setAttribute('aria-label','Tarea');
+  let fin=false;const end=ok=>{if(fin)return;fin=true;done(ok?i.value.trim():null)};
+  i.addEventListener('keydown',e=>{if(e.key==='Enter')end(true);if(e.key==='Escape')end(false)});
+  i.addEventListener('blur',()=>end(true));
+  return i;
+}
+function entryEl(text){
+  const b=document.createElement('button');b.className='entry';
+  const m=text.match(/^([^:]{1,24}):\s*(.*)$/);
+  const who=m?m[1].trim():text;
+  b.style.setProperty('--h',hue(who));
+  if(m){const s=document.createElement('b');s.textContent=m[1].trim()+': ';b.append(s,m[2])}else b.textContent=text;
+  return b;
+}
+function render(){
+  const g=document.getElementById('grid');g.innerHTML='';
+  const end=addDays(cur,6),o={day:'numeric',month:'short'};
+  document.getElementById('wl').textContent=cur.toLocaleDateString('es-AR',o)+' – '+end.toLocaleDateString('es-AR',o)+' '+end.getFullYear();
+  const w=store[key(cur)]||{},todayK=key(new Date());
+  DAYS.forEach((dn,di)=>{
+    const date=addDays(cur,di);
+    const day=document.createElement('section');day.className='day'+(key(date)===todayK?' today':'');
+    const dh=document.createElement('div');dh.className='dh';
+    dh.innerHTML='<div class="dn"></div><div class="dd"></div>';
+    dh.firstChild.textContent=dn;dh.lastChild.textContent=date.toLocaleDateString('es-AR',{day:'numeric',month:'short'});
+    const slots=document.createElement('div');slots.className='slots';
+    SLOTS.forEach((sn,si)=>{
+      const k=di+'-'+si,list=w[k]||[];
+      const slot=document.createElement('div');slot.className='slot';
+      const sl=document.createElement('div');sl.className='sl';sl.textContent=sn;slot.append(sl);
+      list.forEach((t,idx)=>{
+        const e=entryEl(t);
+        e.onclick=()=>{
+          const i=editor(t,v=>{
+            if(v!==null){const arr=wk()[k]||[];if(v==='')arr.splice(idx,1);else arr[idx]=v;wk()[k]=arr;save()}
+            render();
+          });
+          e.replaceWith(i);i.focus();i.select();
+        };
+        slot.append(e);
+      });
+      const a=document.createElement('button');a.className='add';a.textContent='+ Agregar';a.setAttribute('aria-label','Agregar en '+dn+', '+sn);
+      a.onclick=()=>{
+        const i=editor('',v=>{
+          if(v){const arr=wk()[k]||[];arr.push(v);wk()[k]=arr;save()}
+          render();
+        });
+        a.replaceWith(i);i.focus();
+      };
+      slot.append(a);slots.append(slot);
+    });
+    day.append(dh,slots);g.append(day);
+  });
+}
+document.getElementById('prev').onclick=()=>{cur=addDays(cur,-7);render()};
+document.getElementById('next').onclick=()=>{cur=addDays(cur,7);render()};
+document.getElementById('today').onclick=()=>{cur=monday(new Date());render()};
+document.getElementById('copy').onclick=()=>{
+  const prev=store[key(addDays(cur,-7))]||{},w=wk();
+  Object.keys(prev).forEach(k=>{if(!(w[k]&&w[k].length))w[k]=prev[k].slice()});
+  save();render();
+};
+render();
+</script>
+</body>
+</html>
