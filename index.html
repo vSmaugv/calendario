@@ -46,6 +46,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline
 <main>
   <h1>Agenda de la familia</h1>
   <p class="sub">Tocá un casillero para agregar algo. Tocá una tarea para cambiarla o borrarla.</p>
+  <p class="sub" id="st" role="status"></p>
   <div class="bar">
     <button id="prev" aria-label="Semana anterior">‹ Anterior</button>
     <div class="week" id="wl"></div>
@@ -60,16 +61,38 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline
 <script>
 const DAYS=['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
 const SLOTS=['Mañana','Mediodía','Tarde','Noche'];
-const KEY='agenda-familiar-v1';
-let store={};
-try{store=JSON.parse(localStorage.getItem(KEY)||'{}')||{}}catch(e){store={}}
-function save(){try{localStorage.setItem(KEY,JSON.stringify(store))}catch(e){}}
+const LKEY='agenda-familiar-v1';
+let local={};
+try{local=JSON.parse(localStorage.getItem(LKEY)||'{}')||{}}catch(e){local={}}
+function saveLocal(){try{localStorage.setItem(LKEY,JSON.stringify(local))}catch(e){}}
 function monday(d){const x=new Date(d.getFullYear(),d.getMonth(),d.getDate());x.setDate(x.getDate()-((x.getDay()+6)%7));return x}
 function key(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
 function addDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x}
 let cur=monday(new Date());
+let db=null,unsub=null,slots={},exists=false,loaded=false,timer=null;
+const st=document.getElementById('st');
+function setStatus(t){st.textContent=t}
 function hue(s){let h=0;for(const c of s.toLowerCase())h=(h*31+c.charCodeAt(0))%360;return h}
-function wk(){return store[key(cur)]||(store[key(cur)]={})}
+function ref(d){return db.doc('weeks/'+key(d||cur))}
+function sub(){
+  if(unsub){unsub();unsub=null}
+  clearTimeout(timer);slots={};exists=false;
+  if(!db){slots=local[key(cur)]||{};render();return}
+  loaded=false;setStatus('Cargando…');render();
+  timer=setTimeout(()=>{if(!loaded)setStatus('Todavía no hay conexión. Lo que ves puede estar desactualizado.')},10000);
+  unsub=ref().onSnapshot(s=>{
+    exists=s.exists;
+    const d=s.exists?s.data():null;
+    slots=(d&&d.slots)||{};
+    if(!(s.metadata&&s.metadata.fromCache)){loaded=true;clearTimeout(timer);setStatus('Agenda compartida: todos ven los mismos cambios al instante.')}
+    render();
+  },e=>{setStatus('Error al cargar: '+((e&&(e.message||e.code))||'desconocido'))});
+}
+function write(k,arr){
+  if(!db){slots[k]=arr;local[key(cur)]=slots;saveLocal();render();return}
+  const p=exists?ref().update({slots:{[k]:arr}}):ref().set({slots:{[k]:arr}});
+  p.catch(e=>setStatus('No se pudo guardar: '+((e&&(e.message||e.code))||'sin permiso. Pedí que te inviten como editor.')));
+}
 function editor(val,done){
   const i=document.createElement('input');i.className='ed';i.value=val;i.placeholder='Ej.: Gena: hace la comida';i.setAttribute('aria-label','Tarea');
   let fin=false;const end=ok=>{if(fin)return;fin=true;done(ok?i.value.trim():null)};
@@ -89,24 +112,26 @@ function render(){
   const g=document.getElementById('grid');g.innerHTML='';
   const end=addDays(cur,6),o={day:'numeric',month:'short'};
   document.getElementById('wl').textContent=cur.toLocaleDateString('es-AR',o)+' – '+end.toLocaleDateString('es-AR',o)+' '+end.getFullYear();
-  const w=store[key(cur)]||{},todayK=key(new Date());
+  const todayK=key(new Date());
   DAYS.forEach((dn,di)=>{
     const date=addDays(cur,di);
     const day=document.createElement('section');day.className='day'+(key(date)===todayK?' today':'');
     const dh=document.createElement('div');dh.className='dh';
     dh.innerHTML='<div class="dn"></div><div class="dd"></div>';
     dh.firstChild.textContent=dn;dh.lastChild.textContent=date.toLocaleDateString('es-AR',{day:'numeric',month:'short'});
-    const slots=document.createElement('div');slots.className='slots';
+    const sl=document.createElement('div');sl.className='slots';
     SLOTS.forEach((sn,si)=>{
-      const k=di+'-'+si,list=w[k]||[];
+      const k=di+'-'+si,list=slots[k]||[];
       const slot=document.createElement('div');slot.className='slot';
-      const sl=document.createElement('div');sl.className='sl';sl.textContent=sn;slot.append(sl);
+      const lb=document.createElement('div');lb.className='sl';lb.textContent=sn;slot.append(lb);
       list.forEach((t,idx)=>{
         const e=entryEl(t);
         e.onclick=()=>{
           const i=editor(t,v=>{
-            if(v!==null){const arr=wk()[k]||[];if(v==='')arr.splice(idx,1);else arr[idx]=v;wk()[k]=arr;save()}
-            render();
+            if(v===null){render();return}
+            const arr=(slots[k]||[]).slice();
+            if(v==='')arr.splice(idx,1);else arr[idx]=v;
+            write(k,arr);render();
           });
           e.replaceWith(i);i.focus();i.select();
         };
@@ -115,25 +140,39 @@ function render(){
       const a=document.createElement('button');a.className='add';a.textContent='+ Agregar';a.setAttribute('aria-label','Agregar en '+dn+', '+sn);
       a.onclick=()=>{
         const i=editor('',v=>{
-          if(v){const arr=wk()[k]||[];arr.push(v);wk()[k]=arr;save()}
+          if(v){const arr=(slots[k]||[]).slice();arr.push(v);write(k,arr)}
           render();
         });
         a.replaceWith(i);i.focus();
       };
-      slot.append(a);slots.append(slot);
+      slot.append(a);sl.append(slot);
     });
-    day.append(dh,slots);g.append(day);
+    day.append(dh,sl);g.append(day);
   });
 }
-document.getElementById('prev').onclick=()=>{cur=addDays(cur,-7);render()};
-document.getElementById('next').onclick=()=>{cur=addDays(cur,7);render()};
-document.getElementById('today').onclick=()=>{cur=monday(new Date());render()};
-document.getElementById('copy').onclick=()=>{
-  const prev=store[key(addDays(cur,-7))]||{},w=wk();
-  Object.keys(prev).forEach(k=>{if(!(w[k]&&w[k].length))w[k]=prev[k].slice()});
-  save();render();
+function go(n){cur=n;sub()}
+document.getElementById('prev').onclick=()=>go(addDays(cur,-7));
+document.getElementById('next').onclick=()=>go(addDays(cur,7));
+document.getElementById('today').onclick=()=>go(monday(new Date()));
+document.getElementById('copy').onclick=async()=>{
+  let prev={};
+  try{
+    if(db){const ps=await ref(addDays(cur,-7)).get();prev=(ps.exists&&ps.data().slots)||{}}
+    else prev=local[key(addDays(cur,-7))]||{};
+  }catch(e){setStatus('No se pudo leer la semana anterior.');return}
+  const merged={};
+  Object.keys(prev).forEach(k=>{if(prev[k]&&prev[k].length&&!(slots[k]&&slots[k].length))merged[k]=prev[k].slice()});
+  if(!Object.keys(merged).length)return;
+  if(!db){Object.assign(slots,merged);local[key(cur)]=slots;saveLocal();render();return}
+  const p=exists?ref().update({slots:merged}):ref().set({slots:merged});
+  p.catch(e=>setStatus('No se pudo copiar: '+((e&&(e.message||e.code))||'sin permiso')));
 };
 render();
+(async()=>{
+  try{if(window.claude&&window.claude.use)db=await window.claude.use('db')}catch(e){db=null}
+  if(!db)setStatus('Sin conexión compartida: los cambios se guardan solo en este dispositivo.');
+  sub();
+})();
 </script>
 </body>
 </html>
